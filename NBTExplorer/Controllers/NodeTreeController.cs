@@ -645,12 +645,18 @@ namespace NBTExplorer.Controllers
 
         public void RefreshChildNodes(TreeNode node, DataNode dataNode)
         {
+            if (node == null)
+                return;
+
             var currentNodes = new Dictionary<DataNode, TreeNode>();
             foreach (TreeNode child in node.Nodes)
                 if (child.Tag is DataNode)
                     currentNodes.Add(child.Tag as DataNode, child);
 
             node.Nodes.Clear();
+            if (dataNode == null)
+                return;
+
             foreach (var child in dataNode.Nodes)
                 if (!currentNodes.ContainsKey(child))
                     node.Nodes.Add(CreateUnexpandedNode(child));

@@ -1,123 +1,86 @@
 ﻿using NBTExplorer.Model;
-using NBTUtil.Ops;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace NBTUtil
 {
     internal class ConsoleRunner
     {
-        private static readonly Dictionary<ConsoleCommand, ConsoleOperation> _commandTable =
-            new Dictionary<ConsoleCommand, ConsoleOperation>
-            {
-                {ConsoleCommand.SetValue, new EditOperation()},
-                {ConsoleCommand.SetList, new SetListOperation()},
-                {ConsoleCommand.Print, new PrintOperation()},
-                {ConsoleCommand.PrintTree, new PrintTreeOperation()},
-                {ConsoleCommand.Json, new JsonOperation()}
-            };
-
-        private readonly ConsoleOptions _options;
-
         public ConsoleRunner()
         {
-            _options = new ConsoleOptions();
         }
+
+        private static bool Debug = false;
 
         public bool Run(string[] args)
         {
-            _options.Parse(args);
-
-            if (_options.Command == ConsoleCommand.Help)
-                return PrintHelp();
-
-            if (_options.Path == null)
-                return PrintUsage("Error: You must specify a path");
-            if (!_commandTable.ContainsKey(_options.Command))
-                return PrintUsage("Error: No command specified");
-
-            var op = _commandTable[_options.Command];
-            if (!op.OptionsValid(_options))
-                return PrintError("Error: Invalid options specified for the given command");
-
-            var successCount = 0;
-            var failCount = 0;
-
-            foreach (var targetNode in new NbtPathEnumerator(_options.Path))
+            if (!args.Any())
             {
-                if (!op.CanProcess(targetNode))
-                {
-                    Console.WriteLine(targetNode.NodePath + ": ERROR (invalid command)");
-                    failCount++;
-                }
-                if (!op.Process(targetNode, _options))
-                {
-                    Console.WriteLine(targetNode.NodePath + ": ERROR (apply)");
-                    failCount++;
-                }
-
-                targetNode.Root.Save();
-
-                Console.WriteLine(targetNode.NodePath + ": OK");
-                successCount++;
+                PrintError("You must supply a path");
+                return false;
             }
-
-            Console.WriteLine("Operation complete.  Nodes succeeded: {0}  Nodes failed: {1}", successCount, failCount);
+            var path = args[0];
+            if (args.Length == 2)
+            {
+                Debug = bool.Parse(args[1]);
+            }
+            var nodes = new NbtPathEnumerator(path);
+            foreach (var node in nodes)
+            {
+                Process(node);
+            }
 
             return true;
         }
 
-        private DataNode OpenFile(string path)
+        private static void Process(DataNode targetNode)
         {
-            DataNode node = null;
-            foreach (var item in FileTypeRegistry.RegisteredTypes)
-                if (item.Value.NamePatternTest(path))
-                    node = item.Value.NodeCreate(path);
-
-            return node;
-        }
-
-        private DataNode ExpandDataNode(DataNode dataNode, string tagPath)
-        {
-            var pathParts = tagPath.Split('/');
-
-            var curTag = dataNode;
-            curTag.Expand();
-
-            foreach (var part in pathParts)
+            if (NodeContainsRemovedTags(targetNode.NodeName))
             {
-                var container = curTag as TagDataNode.Container;
-                if (curTag == null)
-                    throw new Exception("Invalid tag path");
-
-                DataNode childTag = null;
-                foreach (var child in curTag.Nodes)
-                    if (child.NodePathName == part)
-                        childTag = child;
-
-                if (childTag == null)
-                    throw new Exception("Invalid tag path");
-
-                curTag.Expand();
+                targetNode.DeleteNode();
             }
+            targetNode.Expand();
+            var nodesToDelete = new List<DataNode>();
+            foreach (var child in targetNode.Nodes)
+            {
+                if (child.NodeName == null && !child.Nodes.Any())
+                {
+                    continue;
+                };
 
-            return curTag;
+                if (child.NodeName != null && NodeContainsRemovedTags(child.NodeName))
+                {
+                    OutputDebug(child);
+                    nodesToDelete.Add(child);
+                }
+                else
+                {
+                    Process(child);
+                }
+            }
+            foreach (var node in nodesToDelete)
+            {
+                node.DeleteNode();
+            }
+            targetNode.Root.Save();
+            targetNode.Release();
         }
 
-        private bool PrintHelp()
+        private static bool NodeContainsRemovedTags(string nodeName)
         {
-            Console.WriteLine("NBTUtil - Copyright 2014 Justin Aquadro");
-            _options.PrintUsage();
-
-            return true;
+            nodeName = nodeName.ToLower();
+            return nodeName.Contains("arstheurgia") || nodeName.Contains("astromine");
         }
 
-        private bool PrintUsage(string error)
+        private static void OutputDebug(DataNode node)
         {
-            Console.WriteLine(error);
-            _options.PrintUsage();
-
-            return false;
+            if (Debug)
+            {
+                var pathParts = node.NodePath.Split('/');
+                var path = pathParts.Length > 6 ? string.Join("/", pathParts.Skip(pathParts.Length - 6)) : node.NodePath;
+                Console.WriteLine($"Removing node {node.NodeName} from {path}");
+            }
         }
 
         private bool PrintError(string error)
